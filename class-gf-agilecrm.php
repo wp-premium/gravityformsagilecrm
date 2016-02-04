@@ -23,6 +23,11 @@ class GFAgileCRM extends GFFeedAddOn {
 	
 	/* Members plugin integration */
 	protected $_capabilities = array( 'gravityforms_agilecrm', 'gravityforms_agilecrm_uninstall' );
+
+	/**
+	 * @var string $custom_field_key The custom field key (label/name); used by get_full_address().
+	 */
+	protected $custom_field_key = '';
 	
 	/**
 	 * Get instance of this class.
@@ -33,10 +38,29 @@ class GFAgileCRM extends GFFeedAddOn {
 	 */
 	public static function get_instance() {
 		
-		if ( self::$_instance == null )
+		if ( self::$_instance == null ) {
 			self::$_instance = new self;
+		}
 
 		return self::$_instance;
+		
+	}
+	
+	/**
+	 * Register needed plugin hooks and PayPal delayed payment support.
+	 * 
+	 * @access public
+	 * @return void
+	 */
+	public function init() {
+		
+		parent::init();
+		
+		$this->add_delayed_payment_support(
+			array(
+				'option_label' => esc_html__( 'Create Agile CRM object only when payment is received.', 'gravityformsagilecrm' )
+			)
+		);
 		
 	}
 	
@@ -206,12 +230,14 @@ class GFAgileCRM extends GFFeedAddOn {
 					'onclick'        => "jQuery(this).parents('form').submit();",
 					'choices'        => array(
 						array(
-							'name'          => 'createContact',
-							'label'         => __( 'Create New Contact', 'gravityformsagilecrm' ),
+							'name'  => 'createContact',
+							'label' => __( 'Create Contact', 'gravityformsagilecrm' ),
+							'icon'  => 'fa-user',
 						),
 						array(
-							'name'          => 'createTask',
-							'label'         => __( 'Create New Task', 'gravityformsagilecrm' ),
+							'name'  => 'createTask',
+							'label' => __( 'Create Task', 'gravityformsagilecrm' ),
+							'icon'  => 'fa-tasks'
 						),
 					)
 				)
@@ -483,21 +509,21 @@ class GFAgileCRM extends GFFeedAddOn {
 				'name'          => 'first_name',
 				'label'         => __( 'First Name', 'gravityformsagilecrm' ),
 				'required'      => true,
-				'field_type'    => array( 'name' ),
+				'field_type'    => array( 'name', 'text', 'hidden' ),
 				'default_value' => $this->get_first_field_by_type( 'name', 3 ),
 			),
 			array(	
 				'name'          => 'last_name',
 				'label'         => __( 'Last Name', 'gravityformsagilecrm' ),
 				'required'      => true,
-				'field_type'    => array( 'name' ),
+				'field_type'    => array( 'name', 'text', 'hidden' ),
 				'default_value' => $this->get_first_field_by_type( 'name', 6 ),
 			),
 			array(	
 				'name'          => 'email_address',
 				'label'         => __( 'Email Address', 'gravityformsagilecrm' ),
 				'required'      => true,
-				'field_type'    => array( 'email' ),
+				'field_type'    => array( 'email', 'hidden' ),
 				'default_value' => $this->get_first_field_by_type( 'email' ),
 			),
 		);
@@ -802,11 +828,13 @@ class GFAgileCRM extends GFFeedAddOn {
 		foreach ( $contact_custom_fields as $field_key => $field_id ) {
 			
 			/* Get the field value. */
+			$this->custom_field_key = $field_key;
 			$field_value = $this->get_field_value( $form, $entry, $field_id );
 			
 			/* If the field value is empty, skip this field. */
-			if ( rgblank( $field_value ) )
+			if ( rgblank( $field_value ) ) {
 				continue;
+			}
 			
 			$contact = $this->add_contact_property( $contact, $field_key, $field_value );
 			
@@ -1028,6 +1056,7 @@ class GFAgileCRM extends GFFeedAddOn {
 		foreach ( $contact_custom_fields as $field_key => $field_id ) {
 			
 			/* Get the field value. */
+			$this->custom_field_key = $field_key;
 			$field_value = $this->get_field_value( $form, $entry, $field_id );
 			
 			/* If the field value is empty, skip this field. */
@@ -1041,12 +1070,12 @@ class GFAgileCRM extends GFFeedAddOn {
 		
 		/* Prepare tags. */
 		if ( rgars( $feed, 'meta/contactTags' ) ) {
-			
+
 			$tags            = GFCommon::replace_variables( $feed['meta']['contactTags'], $form, $entry, false, false, false, 'text' );
 			$tags            = array_map( 'trim', explode( ',', $tags ) );
-			$contact['tags'] = array_merge( $contact['tags'], $tags );
+			$tags            = array_merge( $contact['tags'], $tags );
 			$contact['tags'] = gf_apply_filters( 'gform_agilecrm_tags', $form['id'], $tags, $feed, $entry, $form );
-			
+
 		}
 
 		$this->log_debug( __METHOD__ . '(): Updating contact: ' . print_r( $contact, true ) );
@@ -1161,8 +1190,9 @@ class GFAgileCRM extends GFFeedAddOn {
 		$settings = $this->get_plugin_settings();
 		
 		/* If account URL or Javascript API key is empty, exit. */
-		if ( rgblank( $settings['accountURL'] ) || rgblank( $settings['javascriptAPIKey'] ) )
+		if ( rgblank( $settings['accountURL'] ) || rgblank( $settings['javascriptAPIKey'] ) ) {
 			return;
+		}
 			
 		/* Prepare HTML block. */
 		$html  = '<script type="text/javascript" src="https://' . esc_html( $settings['accountURL'] ) . '.agilecrm.com/stats/min/agile-min.js"></script>';
@@ -1189,18 +1219,21 @@ class GFAgileCRM extends GFFeedAddOn {
 		}
 		
 		/* Load the Agile CRM API library. */
-		require_once 'includes/class-agilecrm.php';
+		if ( ! class_exists( 'AgileCRM_API' ) ) {
+			require_once 'includes/class-agilecrm-api.php';
+		}
 
 		/* Get the plugin settings */
 		$settings = $this->get_plugin_settings();
 		
 		/* If any of the account information fields are empty, return null. */
-		if ( rgblank( $settings['accountURL'] ) || rgblank( $settings['emailAddress'] ) || rgblank( $settings['apiKey'] ) )
+		if ( rgblank( $settings['accountURL'] ) || rgblank( $settings['emailAddress'] ) || rgblank( $settings['apiKey'] ) ) {
 			return null;
+		}
 			
 		$this->log_debug( __METHOD__ . "(): Validating API info for {$settings['accountURL']} / {$settings['emailAddress']}." );
 		
-		$agile = new AgileCRM( $settings['accountURL'], $settings['emailAddress'], $settings['apiKey'] );
+		$agile = new AgileCRM_API( $settings['accountURL'], $settings['emailAddress'], $settings['apiKey'] );
 		
 		try {
 			
@@ -1224,6 +1257,49 @@ class GFAgileCRM extends GFFeedAddOn {
 			
 		}
 		
+	}
+
+	/**
+	 * Returns the combined value of the specified Address field.
+	 *
+	 * @param array $entry
+	 * @param string $field_id
+	 *
+	 * @return string
+	 */
+	public function get_full_address( $entry, $field_id ) {
+
+		$street_value  = str_replace( '  ', ' ', trim( rgar( $entry, $field_id . '.1' ) ) );
+		$street2_value = str_replace( '  ', ' ', trim( rgar( $entry, $field_id . '.2' ) ) );
+		$city_value    = str_replace( '  ', ' ', trim( rgar( $entry, $field_id . '.3' ) ) );
+		$state_value   = str_replace( '  ', ' ', trim( rgar( $entry, $field_id . '.4' ) ) );
+		$zip_value     = trim( rgar( $entry, $field_id . '.5' ) );
+		$country_value = trim( rgar( $entry, $field_id . '.6' ) );
+
+		$address = $street_value;
+		$address .= ! empty( $street_value ) && ! empty( $street2_value ) ? "  $street2_value" : $street2_value;
+
+		if ( strpos( $this->custom_field_key, 'address_' ) === 0 ) {
+
+			$address_array = array(
+				'address' => $address,
+				'city'    => $city_value,
+				'state'   => $state_value,
+				'zip'     => $zip_value,
+				'country' => $country_value,
+			);
+
+			return json_encode( $address_array );
+		} else {
+
+			$address .= ! empty( $address ) && ( ! empty( $city_value ) || ! empty( $state_value ) ) ? ", $city_value," : $city_value;
+			$address .= ! empty( $address ) && ! empty( $city_value ) && ! empty( $state_value ) ? "  $state_value" : $state_value;
+			$address .= ! empty( $address ) && ! empty( $zip_value ) ? "  $zip_value," : $zip_value;
+			$address .= ! empty( $address ) && ! empty( $country_value ) ? "  $country_value" : $country_value;
+
+			return $address;
+		}
+
 	}
 
 }
