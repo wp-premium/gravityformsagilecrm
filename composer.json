@@ -1,0 +1,9 @@
+{
+    "name": "wp-premium/gravityformsagilecrm",
+    "type": "wordpress-plugin",
+    "autoload": {
+        "classmap": [
+            "."
+        ]
+    }
+}

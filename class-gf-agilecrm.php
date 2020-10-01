@@ -93,10 +93,12 @@ class GFAgileCRM extends GFFeedAddOn {
 	 */
 	public function styles() {
 
+		$min = defined( 'SCRIPT_DEBUG' ) && SCRIPT_DEBUG || isset( $_GET['gform_debug'] ) ? '' : '.min';
+
 		$styles = array(
 			array(
 				'handle'  => 'gform_agilecrm_form_settings_css',
-				'src'     => $this->get_base_url() . '/css/form_settings.css',
+				'src'     => $this->get_base_url() . "/css/form_settings{$min}.css",
 				'version' => $this->_version,
 				'enqueue' => array(
 					array( 'admin_page' => array( 'form_settings' ) ),
@@ -105,6 +107,19 @@ class GFAgileCRM extends GFFeedAddOn {
 		);
 
 		return array_merge( parent::styles(), $styles );
+
+	}
+
+	/**
+	 * Return the plugin's icon for the plugin/form settings menu.
+	 *
+	 * @since 1.3
+	 *
+	 * @return string
+	 */
+	public function get_menu_icon() {
+
+		return file_get_contents( $this->get_base_path() . '/images/menu-icon.svg' );
 
 	}
 
@@ -126,8 +141,9 @@ class GFAgileCRM extends GFFeedAddOn {
 						'label'             => __( 'Account URL', 'gravityformsagilecrm' ),
 						'type'              => 'text',
 						'class'             => 'small',
-						'after_input'       => '.agilecrm.com',
-						'feedback_callback' => array( $this, 'initialize_api' )
+						'after_input'       => version_compare( GFForms::$version, '2.5-dev-1', '<' ) ? '.agilecrm.com' : null,
+						'append'            => '.agilecrm.com',
+						'feedback_callback' => array( $this, 'initialize_api' ),
 					),
 					array(
 						'name'              => 'emailAddress',
@@ -225,6 +241,7 @@ class GFAgileCRM extends GFFeedAddOn {
 					'type'           => 'text',
 					'required'       => true,
 					'default_value'  => $this->get_default_feed_name(),
+					'class'          => 'medium',
 					'tooltip'        => '<h6>'. __( 'Name', 'gravityformsagilecrm' ) .'</h6>' . __( 'Enter a feed name to uniquely identify this setup.', 'gravityformsagilecrm' )
 				),
 				array(
@@ -272,6 +289,11 @@ class GFAgileCRM extends GFFeedAddOn {
 					'label'          => __( 'Tags', 'gravityformsagilecrm' ),
 					'type'           => 'text',
 					'class'          => 'medium merge-tag-support mt-position-right mt-hide_all_fields',
+					'tooltip'        => sprintf(
+						'<h6>%s</h6>%s',
+						esc_html__( 'Tags', 'gravityformsagilecrm' ),
+						esc_html__( 'Add tags to the contact using a comma separated list (e.g. new lead, Gravity Forms, web source). Each tag must start with an alphabetic character and must not contain special characters other than underscore and space.', 'gravityformsagilecrm' )
+					),
 				),
 				array(
 					'name'           => 'updateContact',
@@ -684,6 +706,21 @@ class GFAgileCRM extends GFFeedAddOn {
 	}
 
 	/**
+	 * Allow the feed to be duplicated.
+	 *
+	 * @since 1.3
+	 *
+	 * @param array|int $id The ID of the feed to be duplicated or the feed object when duplicating a form.
+	 *
+	 * @return bool
+	 */
+	public function can_duplicate_feed( $id ) {
+
+		return true;
+
+	}
+
+	/**
 	 * Setup columns for feed list table.
 	 *
 	 * @access public
@@ -728,33 +765,42 @@ class GFAgileCRM extends GFFeedAddOn {
 	 */
 	public function process_feed( $feed, $entry, $form ) {
 
-		$this->log_debug( __METHOD__ . '(): Processing feed.' );
-
 		/* If API instance is not initialized, exit. */
 		if ( ! $this->initialize_api() ) {
 
-			$this->add_feed_error( esc_html__( 'Feed was not processed because API was not initialized.', 'gravityformsicontact' ), $feed, $entry, $form );
+			$this->add_feed_error( esc_html__( 'Feed was not processed because API was not initialized.', 'gravityformsagilecrm' ), $feed, $entry, $form );
 			return;
 
 		}
 
+		$this->log_debug( __METHOD__ . '(): Processing feed.' );
+
 		/* Create contact? */
-		if ( rgars( $feed, 'meta/createContact') == 1 ) {
+		if ( rgars( $feed, 'meta/createContact' ) == 1 ) {
 
-			$existing_contact = $this->api->search_contacts( $this->get_field_value( $form, $entry, $feed['meta']['contactStandardFields_email_address'] ) );
+			$contact_email = $this->get_field_value( $form, $entry, $feed['meta']['contactStandardFields_email_address'] );
 
-			if ( empty( $existing_contact ) ) {
+			if ( GFCommon::is_invalid_or_empty_email( $contact_email ) ) {
 
-				$contact = $this->create_contact( $feed, $entry, $form );
+				$this->add_feed_error( esc_html__( 'Contact could not be created as email address was not provided.', 'gravityformsagilecrm' ), $feed, $entry, $form );
 
 			} else {
 
-				if ( rgars( $feed, 'meta/updateContactEnable' ) == 1 ) {
+				$existing_contact = $this->api->search_contacts( $contact_email );
 
-					$contact = $this->update_contact( $existing_contact[0], $feed, $entry, $form );
+				if ( empty( $existing_contact ) ) {
+
+					$contact = $this->create_contact( $feed, $entry, $form );
+
+				} else {
+
+					if ( rgars( $feed, 'meta/updateContactEnable' ) == 1 ) {
+
+						$contact = $this->update_contact( $existing_contact[0], $feed, $entry, $form );
+
+					}
 
 				}
-
 			}
 
 		}
@@ -794,14 +840,6 @@ class GFAgileCRM extends GFFeedAddOn {
 		if ( rgblank( $first_name ) || rgblank( $last_name ) ) {
 
 			$this->add_feed_error( esc_html__( 'Contact could not be created as first and/or last name were not provided.', 'gravityformsagilecrm' ), $feed, $entry, $form );
-			return null;
-
-		}
-
-		/* If the email address is empty, exit. */
-		if ( GFCommon::is_invalid_or_empty_email( $default_email ) ) {
-
-			$this->add_feed_error( esc_html__( 'Contact could not be created as email address was not provided.', 'gravityformsagilecrm' ), $feed, $entry, $form );
 			return null;
 
 		}
@@ -847,33 +885,21 @@ class GFAgileCRM extends GFFeedAddOn {
 
 		/* Prepare tags. */
 		if ( rgars( $feed, 'meta/contactTags' ) ) {
-
-			$tags            = GFCommon::replace_variables( $feed['meta']['contactTags'], $form, $entry, false, false, false, 'text' );
-			$tags            = array_map( 'trim', explode( ',', $tags ) );
-			$contact['tags'] = gf_apply_filters( 'gform_agilecrm_tags', $form['id'], $tags, $feed, $entry, $form );
-
+			$contact = $this->add_contact_tags( $contact, $feed, $entry, $form );
 		}
 
 		$this->log_debug( __METHOD__ . '(): Creating contact: ' . print_r( $contact, true ) );
 
-		try {
+		$contact = $this->api->create_contact( $contact );
 
-			/* Create contact. */
-			$contact = $this->api->create_contact( $contact );
-
-			/* Save contact ID to entry. */
-			gform_update_meta( $entry['id'], 'agilecrm_contact_id', $contact['id'] );
-
-			/* Log that contact was created. */
-			$this->log_debug( __METHOD__ . '(): Contact #' . $contact['id'] . ' created.' );
-
-		} catch ( Exception $e ) {
-
-			$this->add_feed_error( sprintf( esc_html__( 'Contact could not be created. %s', 'gravityformsagilecrm' ), $e->getMessage() ), $feed, $entry, $form );
+		if ( is_wp_error( $contact ) ) {
+			$this->add_feed_error( sprintf( esc_html__( 'Contact could not be created. %s', 'gravityformsagilecrm' ), $contact->get_error_message() ), $feed, $entry, $form );
 
 			return null;
-
 		}
+
+		gform_update_meta( $entry['id'], 'agilecrm_contact_id', $contact['id'] );
+		$this->log_debug( __METHOD__ . '(): Contact #' . $contact['id'] . ' created.' );
 
 		return $contact;
 
@@ -926,28 +952,20 @@ class GFAgileCRM extends GFFeedAddOn {
 
 				$this->add_feed_error( esc_html__( 'Note could not be created for task as subject and/or description were not provided.', 'gravityformsagilecrm' ), $feed, $entry, $form );
 
-				$note = array();
-
 			} else {
 
 				$this->log_debug( __METHOD__ . '(): Creating note: ' . print_r( $note, true ) );
 
-				try {
+				$note = $this->api->create_note( $note );
 
-					/* Create note. */
-					$note = $this->api->create_note( $note );
+				if ( is_wp_error( $note ) ) {
 
-					/* Log that note was created. */
+					$this->log_error( __METHOD__ . '(): Note was not created; ' . $note->get_error_message() );
+
+				} else {
+
 					$this->log_debug( __METHOD__ . '(): Note #' . $note['id'] . ' created.' );
-
-					/* Assign note to task. */
 					$task['notes'] = array( $note['id'] );
-
-				} catch ( Exception $e ) {
-
-					$this->log_error( __METHOD__ . '(): Note was not created; ' . $e->getMessage() );
-
-					$note = array();
 
 				}
 
@@ -962,24 +980,19 @@ class GFAgileCRM extends GFFeedAddOn {
 		}
 
 		$this->log_debug( __METHOD__ . '(): Creating task: ' . print_r( $task, true ) );
-		try {
 
-			/* Create task. */
-			$task = $this->api->create_task( $task );
+		$task = $this->api->create_task( $task );
 
-			/* Save task ID to entry. */
-			gform_update_meta( $entry['id'], 'agilecrm_task_id', $task['id'] );
+		if ( is_wp_error( $task ) ) {
 
-			/* Log that task was created. */
-			$this->log_debug( __METHOD__ . '(): Task #' . $task['id'] . ' created.' );
+			$this->add_feed_error( sprintf( esc_html__( 'Task could not be created. %s', 'gravityformsagilecrm' ), $task->get_error_message() ), $feed, $entry, $form );
 
-		} catch ( Exception $e ) {
-
-			$this->add_feed_error( sprintf( esc_html__( 'Task could not be created. %s', 'gravityformsagilecrm' ), $e->getMessage() ), $feed, $entry, $form );
-
-			return null;
+			return array();
 
 		}
+
+		gform_update_meta( $entry['id'], 'agilecrm_task_id', $task['id'] );
+		$this->log_debug( __METHOD__ . '(): Task #' . $task['id'] . ' created.' );
 
 		return $task;
 
@@ -1012,14 +1025,6 @@ class GFAgileCRM extends GFFeedAddOn {
 		if ( rgblank( $first_name ) || rgblank( $last_name ) ) {
 
 			$this->add_feed_error( esc_html__( 'Contact could not be created as first and/or last name were not provided.', 'gravityformsagilecrm' ), $feed, $entry, $form );
-			return null;
-
-		}
-
-		/* If the email address is empty, exit. */
-		if ( GFCommon::is_invalid_or_empty_email( $default_email ) ) {
-
-			$this->add_feed_error( esc_html__( 'Contact could not be created as email address was not provided.', 'gravityformsagilecrm' ), $feed, $entry, $form );
 			return null;
 
 		}
@@ -1075,38 +1080,64 @@ class GFAgileCRM extends GFFeedAddOn {
 
 		/* Prepare tags. */
 		if ( rgars( $feed, 'meta/contactTags' ) ) {
-
-			$tags            = GFCommon::replace_variables( $feed['meta']['contactTags'], $form, $entry, false, false, false, 'text' );
-			$tags            = array_map( 'trim', explode( ',', $tags ) );
-			$tags            = array_merge( $contact['tags'], $tags );
-			$contact['tags'] = gf_apply_filters( 'gform_agilecrm_tags', $form['id'], $tags, $feed, $entry, $form );
-
+			$contact = $this->add_contact_tags( $contact, $feed, $entry, $form );
 		}
 
 		$this->log_debug( __METHOD__ . '(): Updating contact: ' . print_r( $contact, true ) );
 
-		try {
+		$result = $this->api->update_contact( $contact );
 
-			/* Update contact. */
-			$this->api->update_contact( $contact );
-
-			/* Save contact ID to entry. */
-			gform_update_meta( $entry['id'], 'agilecrm_contact_id', $contact['id'] );
-
-			/* Log that contact was updated. */
-			$this->log_debug( __METHOD__ . '(): Contact #' . $contact['id'] . ' updated.' );
-
-		} catch ( Exception $e ) {
-
-			$this->add_feed_error( sprintf( esc_html__( 'Contact could not be updated. %s', 'gravityformsagilecrm' ), $e->getMessage() ), $feed, $entry, $form );
+		if ( is_wp_error( $result ) ) {
+			$this->add_feed_error( sprintf( esc_html__( 'Contact could not be updated. %s', 'gravityformsagilecrm' ), $result->get_error_message() ), $feed, $entry, $form );
 
 			return null;
-
 		}
+
+		gform_update_meta( $entry['id'], 'agilecrm_contact_id', $contact['id'] );
+		$this->log_debug( __METHOD__ . '(): Contact #' . $contact['id'] . ' updated.' );
 
 		return $contact;
 
 	}
+
+	/**
+	 * Adds the tags to the contact.
+	 *
+	 * @since 1.4
+	 *
+	 * @param array $contact The contact being created or updated.
+	 * @param array $feed    The feed currently being processed.
+	 * @param array $entry   The entry currently being processed.
+	 * @param array $form    The form for which the entry was created.
+	 *
+	 * @return array
+	 */
+	public function add_contact_tags( $contact, $feed, $entry, $form ) {
+		$tags = GFCommon::replace_variables( $feed['meta']['contactTags'], $form, $entry, false, false, false, 'text' );
+		$tags = array_map( 'trim', explode( ',', $tags ) );
+
+		if ( ! empty( $contact['tags'] ) ) {
+			$tags = array_merge( $contact['tags'], $tags );
+		}
+
+		// Clean array of duplicate and empty items.
+		$tags = array_values( array_unique( array_filter( $tags ) ) );
+
+		/**
+		 * Allows the contact tags to be overridden during feed processing.
+		 *
+		 * @since 1.0
+		 *
+		 * @param string[] $tags  An array of strings to be added as the contact tags.
+		 * @param array    $feed  The feed currently being processed.
+		 * @param array    $entry The entry currently being processed.
+		 * @param array    $form  The form for which the entry was created.
+		 */
+		$contact['tags'] = gf_apply_filters( 'gform_agilecrm_tags', $form['id'], $tags, $feed, $entry, $form );
+
+		return $contact;
+	}
+
 
 	/**
 	 * Add property to contact object.
@@ -1195,7 +1226,7 @@ class GFAgileCRM extends GFFeedAddOn {
 		$settings = $this->get_plugin_settings();
 
 		/* If account URL or JavaScript API key is empty, exit. */
-		if ( rgblank( $settings['accountURL'] ) || rgblank( $settings['javascriptAPIKey'] ) ) {
+		if ( empty( $settings['accountURL'] ) || empty( $settings['javascriptAPIKey'] ) ) {
 			return;
 		}
 
@@ -1231,7 +1262,7 @@ class GFAgileCRM extends GFFeedAddOn {
 		$settings = $this->get_plugin_settings();
 
 		/* If any of the account information fields are empty, return null. */
-		if ( rgblank( $settings['accountURL'] ) || rgblank( $settings['emailAddress'] ) || rgblank( $settings['apiKey'] ) ) {
+		if ( empty( $settings['accountURL'] ) || empty( $settings['emailAddress'] ) || empty( $settings['apiKey'] ) ) {
 			return null;
 		}
 
@@ -1239,27 +1270,20 @@ class GFAgileCRM extends GFFeedAddOn {
 
 		$agile = new GF_AgileCRM_API( $settings['accountURL'], $settings['emailAddress'], $settings['apiKey'] );
 
-		try {
+		$result = $agile->get_contacts();
 
-			/* Run API test. */
-			$agile->get_contacts();
-
-			/* Log that test passed. */
-			$this->log_debug( __METHOD__ . '(): API credentials are valid.' );
-
-			/* Assign Agile CRM object to the class. */
-			$this->api = $agile;
-
-			return true;
-
-		} catch ( Exception $e ) {
-
-			/* Log that test failed. */
-			$this->log_error( __METHOD__ . '(): API credentials are invalid; '. $e->getMessage() );
+		if ( is_wp_error( $result ) ) {
+			$this->log_error( __METHOD__ . '(): API credentials are invalid; ' . $result->get_error_message() );
 
 			return false;
-
 		}
+
+		$this->log_debug( __METHOD__ . '(): API credentials are valid.' );
+
+		/* Assign Agile CRM object to the class. */
+		$this->api = $agile;
+
+		return true;
 
 	}
 
