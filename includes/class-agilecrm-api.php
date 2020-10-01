@@ -40,7 +40,7 @@ class GF_AgileCRM_API {
 	 *
 	 * @uses GF_AgileCRM_API::make_request()
 	 * 
-	 * @return array
+	 * @return array|WP_Error
 	 */
 	public function create_contact( $contact ) {
 		
@@ -57,8 +57,8 @@ class GF_AgileCRM_API {
 	 * @param array $note Note details.
 	 *
 	 * @uses GF_AgileCRM_API::make_request()
-	 * 
-	 * @return array
+	 *
+	 * @return array|WP_Error
 	 */
 	public function create_note( $note ) {
 		
@@ -74,7 +74,7 @@ class GF_AgileCRM_API {
 	 *
 	 * @uses GF_AgileCRM_API::make_request()
 	 * 
-	 * @return array
+	 * @return array|WP_Error
 	 */
 	public function get_contacts() {
 		
@@ -92,7 +92,7 @@ class GF_AgileCRM_API {
 	 *
 	 * @uses GF_AgileCRM_API::make_request()
 	 * 
-	 * @return array
+	 * @return array|WP_Error
 	 */
 	public function create_task( $task ) {
 		
@@ -110,7 +110,7 @@ class GF_AgileCRM_API {
 	 *
 	 * @uses GF_AgileCRM_API::make_request()
 	 * 
-	 * @return array
+	 * @return array|WP_Error
 	 */
 	public function search_contacts( $query ) {
 		
@@ -128,7 +128,7 @@ class GF_AgileCRM_API {
 	 *
 	 * @uses GF_AgileCRM_API::make_request()
 	 * 
-	 * @return array
+	 * @return array|WP_Error
 	 */
 	public function update_contact( $contact ) {
 		
@@ -145,9 +145,9 @@ class GF_AgileCRM_API {
 	 * @param string $action        Request action.
 	 * @param array  $options       Request options.
 	 * @param string $method        HTTP method. Defaults to GET.
-	 * @param int    $response_code Expected HTTP response code. Defaults to 200.
+	 * @param int    $expected_code Expected HTTP response code. Defaults to 200.
 	 *
-	 * @return array or int
+	 * @return array|int|WP_Error
 	 */
 	private function make_request( $action, $options = array(), $method = 'GET', $expected_code = 200 ) {
 					
@@ -176,20 +176,20 @@ class GF_AgileCRM_API {
 		// Execute API request.
 		$response = wp_remote_request( $request_url, $request_args );
 
-		// If API request returns a WordPress error, throw an exception.
 		if ( is_wp_error( $response ) ) {
-			throw new Exception( 'Request failed. '. $response->get_error_message() );
+			return $response;
 		}
+
+		$response_code = wp_remote_retrieve_response_code( $response );
 		
-		// If response code does not match expected code, throw exception.
-		if ( $response['response']['code'] !== $expected_code ) {
+		if ( $response_code !== $expected_code ) {
 			
-			if ( $response['response']['code'] == 400 ) {
-				throw new Exception( 'Input is in the wrong format.' );
-			} elseif ( $response['response']['code'] == 401 ) {
-				throw new Exception( 'API credentials invalid.' );			
+			if ( $response_code == 400 ) {
+				return new WP_Error( $response_code, ! empty( $response['body'] ) ? $response['body'] : 'Input is in the wrong format.' );
+			} elseif ( $response_code == 401 ) {
+				return new WP_Error( $response_code, 'API credentials invalid.' );
 			} else {
-				throw new Exception( sprintf( '%s: %s', $response['response']['code'], $response['response']['message'] ) );
+				return new WP_Error( $response_code, $response['response']['message'] );
 			}
 			
 		}

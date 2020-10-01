@@ -7,17 +7,17 @@ if ( ! defined( 'ABSPATH' ) ) {
 
 /**
 Plugin Name: Gravity Forms Agile CRM Add-On
-Plugin URI: https://www.gravityforms.com
+Plugin URI: https://gravityforms.com
 Description: Integrates Gravity Forms with Agile CRM, allowing form submissions to be automatically sent to your Agile CRM account.
-Version: 1.2
-Author: rocketgenius
-Author URI: https://www.rocketgenius.com
+Version: 1.4
+Author: Gravity Forms
+Author URI: https://gravityforms.com
 License: GPL-2.0+
 Text Domain: gravityformsagilecrm
 Domain Path: /languages
 
 ------------------------------------------------------------------------
-Copyright 2009-2016 Rocketgenius, Inc.
+Copyright 2009-2020 Rocketgenius, Inc.
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -33,8 +33,7 @@ You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
  **/
-
-define( 'GF_AGILECRM_VERSION', '1.2' );
+define( 'GF_AGILECRM_VERSION', '1.4' );
 
 // If Gravity Forms is loaded, bootstrap the Agile CRM Add-On.
 add_action( 'gform_loaded', array( 'GF_AgileCRM_Bootstrap', 'load' ), 5 );
